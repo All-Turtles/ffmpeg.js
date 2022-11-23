@@ -8,25 +8,30 @@ POST_JS_WORKER = build/post-worker.js
 
 COMMON_FILTERS = aresample scale crop overlay hstack vstack
 COMMON_DEMUXERS = matroska ogg mov mp3 wav image2 concat
-COMMON_DECODERS = vp8 h264 vorbis opus mp3 aac pcm_s16le mjpeg png
+COMMON_DECODERS = vp8 vp9 h264 vorbis opus mp3 aac pcm_s16le mjpeg png
+COMMON_BSFS = vp9_superframe h264_mp4toannexb
 
-WEBM_MUXERS = webm ogg null
-WEBM_ENCODERS = libvpx_vp8 libopus
+WEBM_MUXERS = webm ogg mp4 mp3 null
+WEBM_ENCODERS = libvpx_vp9 libopus libx264 libmp3lame aac
 FFMPEG_WEBM_BC = build/ffmpeg-webm/ffmpeg.bc
 FFMPEG_WEBM_PC_PATH = ../opus/dist/lib/pkgconfig
 WEBM_SHARED_DEPS = \
 	build/opus/dist/lib/libopus.so \
-	build/libvpx/dist/lib/libvpx.so
+	build/libvpx/dist/lib/libvpx.so \
+	build/lame/dist/lib/libmp3lame.so \
+	build/x264/dist/lib/libx264.so \
 
-MP4_MUXERS = mp4 mp3 null
-MP4_ENCODERS = libx264 libmp3lame aac
+MP4_MUXERS = mp4 mp3 webm null
+MP4_ENCODERS = libx264 libmp3lame aac libvpx_vp9 libopus
 FFMPEG_MP4_BC = build/ffmpeg-mp4/ffmpeg.bc
 FFMPEG_MP4_PC_PATH = ../x264/dist/lib/pkgconfig
 MP4_SHARED_DEPS = \
 	build/lame/dist/lib/libmp3lame.so \
-	build/x264/dist/lib/libx264.so
+	build/x264/dist/lib/libx264.so \
+	build/opus/dist/lib/libopus.so \
+	build/libvpx/dist/lib/libvpx.so
 
-all: webm mp4
+all: mp4 webm
 webm: ffmpeg-webm.js ffmpeg-worker-webm.js
 mp4: ffmpeg-mp4.js ffmpeg-worker-mp4.js
 
@@ -65,7 +70,7 @@ build/opus/dist/lib/libopus.so: build/opus/configure
 		--disable-hardening \
 		--disable-stack-protector \
 		&& \
-	emmake make -j && \
+	emmake make && \
 	emmake make install
 
 build/libvpx/dist/lib/libvpx.so:
@@ -86,10 +91,8 @@ build/libvpx/dist/lib/libvpx.so:
 		--disable-unit-tests \
 		--disable-webm-io \
 		--disable-libyuv \
-		--disable-vp8-decoder \
-		--disable-vp9 \
 		&& \
-	emmake make -j && \
+	emmake make && \
 	emmake make install
 
 build/lame/dist/lib/libmp3lame.so:
@@ -107,7 +110,7 @@ build/lame/dist/lib/libmp3lame.so:
 		--disable-decoder \
 		--disable-frontend \
 		&& \
-	emmake make -j && \
+	emmake make && \
 	emmake make install
 
 build/x264/dist/lib/libx264.so:
@@ -132,7 +135,7 @@ build/x264/dist/lib/libx264.so:
 		--disable-gpac \
 		--disable-lsmash \
 		&& \
-	emmake make -j && \
+	emmake make && \
 	emmake make install
 
 # TODO(Kagami): Emscripten documentation recommends to always use shared
@@ -172,6 +175,7 @@ FFMPEG_COMMON_ARGS = \
 	--disable-dxva2 \
 	--disable-vaapi \
 	--disable-vdpau \
+	$(addprefix --enable-bsf=,$(COMMON_BSFS)) \
 	$(addprefix --enable-decoder=,$(COMMON_DECODERS)) \
 	$(addprefix --enable-demuxer=,$(COMMON_DEMUXERS)) \
 	--enable-protocol=file \
@@ -191,12 +195,13 @@ build/ffmpeg-webm/ffmpeg.bc: $(WEBM_SHARED_DEPS)
 		$(FFMPEG_COMMON_ARGS) \
 		$(addprefix --enable-encoder=,$(WEBM_ENCODERS)) \
 		$(addprefix --enable-muxer=,$(WEBM_MUXERS)) \
+		--pkg-config-flags="--static" \
 		--enable-libopus \
 		--enable-libvpx \
 		--extra-cflags="-s USE_ZLIB=1 -I../libvpx/dist/include" \
 		--extra-ldflags="-L../libvpx/dist/lib" \
 		&& \
-	emmake make -j && \
+	emmake make && \
 	cp ffmpeg ffmpeg.bc
 
 build/ffmpeg-mp4/ffmpeg.bc: $(MP4_SHARED_DEPS)
@@ -205,13 +210,14 @@ build/ffmpeg-mp4/ffmpeg.bc: $(MP4_SHARED_DEPS)
 		$(FFMPEG_COMMON_ARGS) \
 		$(addprefix --enable-encoder=,$(MP4_ENCODERS)) \
 		$(addprefix --enable-muxer=,$(MP4_MUXERS)) \
+		--pkg-config-flags="--static" \
 		--enable-gpl \
 		--enable-libmp3lame \
 		--enable-libx264 \
 		--extra-cflags="-s USE_ZLIB=1 -I../lame/dist/include" \
 		--extra-ldflags="-L../lame/dist/lib" \
 		&& \
-	emmake make -j && \
+	emmake make && \
 	cp ffmpeg ffmpeg.bc
 
 EMCC_COMMON_ARGS = \
@@ -224,7 +230,8 @@ EMCC_COMMON_ARGS = \
 	-s EXIT_RUNTIME=1 \
 	-s NODEJS_CATCH_EXIT=0 \
 	-s NODEJS_CATCH_REJECTION=0 \
-	-s TOTAL_MEMORY=67108864 \
+	-s TOTAL_MEMORY=134217728 \
+	-s ALLOW_MEMORY_GROWTH=1 \
 	-lnodefs.js -lworkerfs.js \
 	--pre-js $(PRE_JS) \
 	-o $@
